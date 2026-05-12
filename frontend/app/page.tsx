@@ -1,14 +1,30 @@
 "use client";
 
+import { uploadSlides } from "@/app/lib/upload";
 import Link from "next/link";
 import { useCallback, useId, useRef, useState } from "react";
 
+type ExtractResult = Awaited<ReturnType<typeof uploadSlides>>;
+
 const ACCEPT = ".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
-function formatBytes(n: number) {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+function Spinner({ className = "h-8 w-8 text-sky-400" }: { className?: string }) {
+  return (
+    <svg
+      className={`animate-spin ${className}`}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden
+    >
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path
+        className="opacity-90"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+      />
+    </svg>
+  );
 }
 
 function CloudUploadIcon({ className }: { className?: string }) {
@@ -65,9 +81,12 @@ const howCards = [
 
 export default function Home() {
   const inputId = useId();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
-  const [files, setFiles] = useState<File[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [extractResult, setExtractResult] = useState<ExtractResult | null>(null);
 
   const filterAccepted = useCallback((list: FileList | File[]) => {
     const out: File[] = [];
@@ -79,17 +98,41 @@ export default function Home() {
     return out;
   }, []);
 
-  const addFiles = useCallback(
+  const processUpload = useCallback(async (file: File) => {
+    setIsAnalyzing(true);
+    setExtractError(null);
+    setExtractResult(null);
+    try {
+      const data = await uploadSlides(file);
+      setExtractResult(data);
+    } catch (err) {
+      setExtractError(err instanceof Error ? err.message : "Failed to analyze slides");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, []);
+
+  const queueUpload = useCallback(
     (list: FileList | null) => {
-      if (!list?.length) return;
+      if (!list?.length || isAnalyzing) return;
       const next = filterAccepted(list);
-      if (next.length) setFiles((prev) => [...prev, ...next]);
+      if (!next.length) return;
+      void processUpload(next[0]);
     },
-    [filterAccepted]
+    [filterAccepted, isAnalyzing, processUpload]
   );
+
+  const resetUploadFlow = useCallback(() => {
+    setExtractResult(null);
+    setExtractError(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
 
   const onDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
+    if (isAnalyzing) return;
+    const types = Array.from(e.dataTransfer.types);
+    if (!types.includes("Files")) return;
     dragDepth.current += 1;
     setIsDragging(true);
   };
@@ -112,16 +155,12 @@ export default function Home() {
     e.preventDefault();
     dragDepth.current = 0;
     setIsDragging(false);
-    addFiles(e.dataTransfer.files);
+    queueUpload(e.dataTransfer.files);
   };
 
   const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    addFiles(e.target.files);
+    queueUpload(e.target.files);
     e.target.value = "";
-  };
-
-  const removeAt = (i: number) => {
-    setFiles((prev) => prev.filter((_, idx) => idx !== i));
   };
 
   return (
@@ -212,8 +251,8 @@ export default function Home() {
           </p>
         </div>
 
-        <div id="upload" className="relative mx-auto mt-16 max-w-xl scroll-mt-28">
-          <div className="relative rounded-2xl">
+        <div id="upload" className="relative mx-auto mt-16 max-w-2xl scroll-mt-28">
+          <div className="relative mx-auto max-w-xl rounded-2xl">
             <svg
               className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
               aria-hidden
@@ -234,10 +273,14 @@ export default function Home() {
                 ry="15"
                 fill="none"
                 stroke="url(#slideSyncUploadRing)"
-                strokeWidth="2"
+                strokeWidth={isDragging && !isAnalyzing ? 2.5 : 2}
                 strokeDasharray="10 8"
                 strokeLinecap="round"
-                className="opacity-90 [animation:upload-dash-shift_2.5s_linear_infinite] drop-shadow-[0_0_10px_rgba(56,189,248,0.45)]"
+                className={
+                  isDragging && !isAnalyzing
+                    ? "opacity-100 [animation:upload-dash-shift_1.2s_linear_infinite] drop-shadow-[0_0_22px_rgba(56,189,248,0.95)]"
+                    : "opacity-90 [animation:upload-dash-shift_2.5s_linear_infinite] drop-shadow-[0_0_10px_rgba(56,189,248,0.45)]"
+                }
                 vectorEffect="non-scaling-stroke"
               />
             </svg>
@@ -247,72 +290,122 @@ export default function Home() {
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
               onDrop={onDrop}
-              className={`upload-zone-animated group relative m-[2px] flex cursor-pointer flex-col items-center rounded-[14px] border border-white/[0.06] bg-[#0d1528]/90 px-6 py-14 shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset] backdrop-blur-sm transition-all duration-300 sm:px-10 ${
-                isDragging
-                  ? "scale-[1.01] border-sky-400/35 bg-sky-500/15 shadow-[0_0_48px_-8px_rgba(56,189,248,0.55)]"
-                  : "hover:border-sky-400/25 hover:bg-[#101a2e]/95 hover:shadow-[0_0_40px_-10px_rgba(56,189,248,0.35)]"
+              aria-busy={isAnalyzing}
+              className={`group relative m-[2px] flex cursor-pointer flex-col items-center rounded-[14px] border bg-[#0d1528]/90 px-6 py-14 shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset] backdrop-blur-sm transition-all duration-300 sm:px-10 ${
+                isAnalyzing
+                  ? "pointer-events-none border-white/[0.06] opacity-55"
+                  : isDragging
+                    ? "upload-zone-dragging scale-[1.02] border-sky-300/80 bg-sky-500/20"
+                    : "upload-zone-animated border-white/[0.06] hover:border-sky-400/25 hover:bg-[#101a2e]/95 hover:shadow-[0_0_40px_-10px_rgba(56,189,248,0.35)]"
               }`}
             >
               <input
+                ref={fileInputRef}
                 id={inputId}
                 type="file"
                 accept={ACCEPT}
                 multiple
+                disabled={isAnalyzing}
                 className="sr-only"
                 onChange={onInputChange}
               />
-              <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400/25 via-sky-500/10 to-transparent text-sky-300 shadow-[0_0_32px_-4px_rgba(56,189,248,0.55),inset_0_1px_0_0_rgba(255,255,255,0.12)] ring-1 ring-sky-400/35 transition-transform duration-300 group-hover:scale-105 group-hover:shadow-[0_0_40px_rgba(56,189,248,0.5)]">
+              <div
+                className={`mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400/25 via-sky-500/10 to-transparent text-sky-300 shadow-[0_0_32px_-4px_rgba(56,189,248,0.55),inset_0_1px_0_0_rgba(255,255,255,0.12)] ring-1 ring-sky-400/35 transition-all duration-300 group-hover:scale-105 group-hover:shadow-[0_0_40px_rgba(56,189,248,0.5)] ${
+                  isDragging && !isAnalyzing
+                    ? "scale-105 text-sky-200 shadow-[0_0_48px_2px_rgba(56,189,248,0.65),inset_0_1px_0_0_rgba(255,255,255,0.18)] ring-sky-300/60"
+                    : ""
+                }`}
+              >
                 <CloudUploadIcon className="h-8 w-8" />
               </div>
               <span className="text-lg font-semibold tracking-tight text-white">
-                Drop your PDF or PPTX here
+                {isDragging && !isAnalyzing ? "Release to Upload" : "Drop your PDF or PPTX here"}
               </span>
-              <span className="mt-2 text-center text-sm text-slate-400 transition-colors duration-300 group-hover:text-slate-300">
-                or click to browse
+              <span
+                className={`mt-2 text-center text-sm transition-colors duration-300 ${
+                  isDragging && !isAnalyzing
+                    ? "font-medium text-sky-200"
+                    : "text-slate-400 group-hover:text-slate-300"
+                }`}
+              >
+                {isDragging && !isAnalyzing ? "PDF & PowerPoint only" : "or click to browse"}
               </span>
               <span className="mt-8 rounded-full border border-white/[0.06] bg-white/[0.04] px-3 py-1 text-[11px] font-medium text-slate-500">
-                Preview — no upload yet
+                Local API · http://localhost:8000
               </span>
             </label>
           </div>
 
-          {files.length > 0 && (
-            <ul className="mt-6 space-y-2 rounded-xl border border-white/[0.08] bg-[#0d1528]/60 p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.03)_inset] backdrop-blur-md">
-              {files.map((f, i) => (
-                <li
-                  key={`${f.name}-${i}`}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-transparent px-3 py-2.5 text-sm transition-all duration-300 hover:border-white/[0.06] hover:bg-white/[0.04]"
-                >
-                  <div className="min-w-0 flex items-center gap-3">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/15 text-sky-300 shadow-[0_0_20px_-6px_rgba(56,189,248,0.5)] ring-1 ring-sky-400/20">
-                      {f.name.toLowerCase().endsWith(".pdf") ? (
-                        <span className="text-[10px] font-bold">PDF</span>
-                      ) : (
-                        <span className="text-[10px] font-bold">PPT</span>
-                      )}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-slate-200">{f.name}</p>
-                      <p className="text-xs text-slate-500">{formatBytes(f.size)}</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      removeAt(i);
-                    }}
-                    className="shrink-0 rounded-md p-1.5 text-slate-500 transition-all duration-300 hover:bg-white/10 hover:text-white active:scale-90"
-                    aria-label={`Remove ${f.name}`}
+          {isAnalyzing && (
+            <div
+              className="mt-8 flex flex-col items-center justify-center gap-4 rounded-xl border border-sky-500/20 bg-[#0d1528]/70 px-6 py-10 shadow-[0_0_0_1px_rgba(255,255,255,0.03)_inset] backdrop-blur-md"
+              role="status"
+              aria-live="polite"
+            >
+              <Spinner />
+              <p className="text-center text-sm font-medium text-slate-200">Analyzing your slides...</p>
+            </div>
+          )}
+
+          {extractError && !isAnalyzing && (
+            <div
+              className="mt-6 rounded-xl border border-red-500/35 bg-red-950/40 px-4 py-3 text-sm text-red-200 shadow-[0_0_24px_-8px_rgba(239,68,68,0.35)]"
+              role="alert"
+            >
+              {extractError}
+            </div>
+          )}
+
+          {extractResult && !isAnalyzing && (
+            <div className="mt-10 space-y-6">
+              <div className="flex flex-col gap-1 border-b border-white/[0.08] pb-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wider text-slate-500">Extracted deck</p>
+                  <p className="mt-1 truncate text-sm text-slate-400" title={extractResult.filename}>
+                    {extractResult.filename}
+                  </p>
+                </div>
+                <p className="text-2xl font-bold tabular-nums tracking-tight text-white sm:text-3xl">
+                  {extractResult.total_slides}{" "}
+                  <span className="text-base font-semibold text-slate-400">
+                    slide{extractResult.total_slides === 1 ? "" : "s"}
+                  </span>
+                </p>
+              </div>
+
+              <ul className="space-y-3">
+                {extractResult.slides.map((slide) => (
+                  <li
+                    key={slide.slide_number}
+                    className="rounded-xl border border-white/[0.08] bg-[#0c1322]/90 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.03)_inset] transition-all duration-300 hover:border-sky-500/20 hover:bg-[#0e1628]/95"
                   >
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M18 6 6 18M6 6l12 12" />
-                    </svg>
-                  </button>
-                </li>
-              ))}
-            </ul>
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 shrink-0 rounded-md bg-white/[0.06] px-2 py-0.5 text-xs font-mono font-medium text-sky-300/90 ring-1 ring-white/[0.06]">
+                        {slide.slide_number}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-bold leading-snug text-white">{slide.title}</h3>
+                        {slide.content ? (
+                          <p className="mt-2 line-clamp-4 text-sm leading-relaxed text-slate-400">{slide.content}</p>
+                        ) : (
+                          <p className="mt-2 text-sm italic text-slate-500">No body text detected.</p>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="flex justify-center pt-2">
+                <button
+                  type="button"
+                  onClick={resetUploadFlow}
+                  className="rounded-lg border border-white/[0.1] bg-white/[0.05] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-300 hover:border-sky-400/40 hover:bg-white/[0.09] hover:shadow-[0_0_24px_-8px_rgba(56,189,248,0.35)] active:scale-[0.98]"
+                >
+                  Upload Another File
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
