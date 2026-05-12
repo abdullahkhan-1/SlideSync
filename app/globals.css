@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0f1e;
+  --foreground: #e8f0ff;
+  --page-bg: #0a0f1e;
 }
 
 @theme inline {
@@ -10,17 +11,54 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --color-navy-950: #0a0f1e;
+  --color-navy-900: #0d1525;
+  --color-navy-850: #111a2e;
+  --color-navy-800: #152238;
+  --color-electric-300: #67e8f9;
+  --color-electric-400: #22d3ee;
+  --color-electric-500: #06b6d4;
+  --color-electric-600: #0891b2;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@keyframes upload-glow-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 20px rgba(34, 211, 238, 0.2),
+      0 0 40px rgba(59, 130, 246, 0.12),
+      inset 0 0 30px rgba(34, 211, 238, 0.04);
+    border-color: rgba(34, 211, 238, 0.45);
   }
+  50% {
+    box-shadow:
+      0 0 32px rgba(34, 211, 238, 0.45),
+      0 0 64px rgba(59, 130, 246, 0.22),
+      inset 0 0 40px rgba(34, 211, 238, 0.08);
+    border-color: rgba(56, 189, 248, 0.85);
+  }
+}
+
+@keyframes upload-dash-shift {
+  to {
+    stroke-dashoffset: -40;
+  }
+}
+
+.dot-grid-overlay {
+  background-image: radial-gradient(
+    rgba(255, 255, 255, 0.06) 1px,
+    transparent 1px
+  );
+  background-size: 28px 28px;
+}
+
+.upload-zone-animated {
+  animation: upload-glow-pulse 3s ease-in-out infinite;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
